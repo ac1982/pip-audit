@@ -8,6 +8,12 @@ All versions prior to 0.0.9 are untracked.
 
 ## [Unreleased]
 
+### Added
+
+* HTTP requests to vulnerability services now identify the `pip-audit` version
+  in the `User-Agent` header
+  ([#942](https://github.com/pypa/pip-audit/issues/942)).
+
 ### Fixed
 
 * Editable requirements skipped with `--skip-editable` no longer require a hash

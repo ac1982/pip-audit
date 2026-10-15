@@ -1,11 +1,15 @@
 from pathlib import Path
 
 import pretend  # type: ignore
+import pytest
+import requests
 from packaging.version import Version
 from platformdirs import user_cache_path
 
 import pip_audit._cache as cache
+from pip_audit import __version__
 from pip_audit._cache import _get_cache_dir, _get_pip_cache
+from pip_audit._service import EcosystemsService, OsvService, PyPIService, ResolvedDependency
 
 
 def test_get_cache_dir(monkeypatch):
@@ -78,3 +82,41 @@ def test_delete_legacy_cache_dir(monkeypatch, tmp_path):
 
     _get_cache_dir(None, use_pip=False)
     assert not legacy.exists()
+
+
+def test_caching_session_user_agent(cache_dir):
+    with cache.caching_session(cache_dir) as session:
+        request = session.prepare_request(requests.Request("GET", "https://example.com/"))
+        assert request.headers["User-Agent"] == f"pip-audit/{__version__}"
+        assert request.headers["Accept"] == "*/*"
+        assert session.max_redirects == 5
+
+
+@pytest.mark.parametrize(
+    ("service_type", "response_body", "method"),
+    [
+        (PyPIService, b'{"vulnerabilities": []}', "GET"),
+        (OsvService, b"{}", "POST"),
+        (EcosystemsService, b"[]", "GET"),
+    ],
+)
+def test_services_send_user_agent(service_type, response_body, method, cache_dir, monkeypatch):
+    service = service_type(cache_dir=cache_dir)
+    sent = []
+
+    def send(request, **kwargs):
+        sent.append(request)
+        response = requests.Response()
+        response.status_code = 200
+        response._content = response_body
+        return response
+
+    monkeypatch.setattr(service.session, "send", send)
+    dependency = ResolvedDependency("example", Version("1.0"))
+    try:
+        assert service.query(dependency) == (dependency, [])
+    finally:
+        service.session.close()
+    assert len(sent) == 1
+    assert sent[0].method == method
+    assert sent[0].headers["User-Agent"] == f"pip-audit/{__version__}"
